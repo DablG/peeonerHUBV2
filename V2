@@ -1,0 +1,300 @@
+-- SWILL FRUIT FARMER (Delta)
+-- Авто-сбор фруктов + Server Hop + Anti-AFK
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local VirtualUser = game:GetService("VirtualUser")
+local LocalPlayer = Players.LocalPlayer
+local PlaceId = game.PlaceId
+
+-- НАСТРОЙКИ
+local Config = {
+    ScanInterval = 2,        -- Как часто сканировать фрукты (сек)
+    HopDelay = 5,            -- Задержка перед хопом (сек)
+    MaxServerPlayers = 8,    -- Макс игроков в сервере для хопа
+    TweenSpeed = 300,        -- Скорость полёта
+    AntiAFK = true,
+    AutoHop = true
+}
+
+local Enabled = true
+local VisitedServers = {}
+local IsHopping = false
+
+-- ============================================
+-- ПОИСК ФРУКТОВ
+-- ============================================
+local function FindFruit()
+    for _, v in pairs(Workspace:GetChildren()) do
+        if v:IsA("Tool") or v:IsA("Model") then
+            local name = v.Name:lower()
+            if name:find("fruit") or name:find("dragon") or name:find("dough") or name:find("leopard") or name:find("kitsune") then
+                return v
+            end
+        end
+    end
+    return nil
+end
+
+-- ============================================
+-- ТЕЛЕПОРТ К ФРУКТУ
+-- ============================================
+local function TeleportToFruit(fruit)
+    local char = LocalPlayer.Character
+    if not char then return false end
+    
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    
+    local fruitPart = fruit:FindFirstChildWhichIsA("BasePart")
+    if not fruitPart and fruit:IsA("Tool") then
+        fruitPart = fruit:FindFirstChild("Handle")
+    end
+    
+    if not fruitPart then return false end
+    
+    -- Плавный полёт к фрукту
+    local targetPos = fruitPart.CFrame
+    local distance = (hrp.Position - fruitPart.Position).Magnitude
+    
+    if distance > 500 then
+        -- Далеко — телепорт
+        hrp.CFrame = targetPos * CFrame.new(0, 5, 0)
+    else
+        -- Близко — плавный полёт
+        local tweenInfo = TweenInfo.new(distance / Config.TweenSpeed, Enum.EasingStyle.Linear)
+        local tween = game:GetService("TweenService"):Create(hrp, tweenInfo, {CFrame = targetPos * CFrame.new(0, 5, 0)})
+        tween:Play()
+        tween.Completed:Wait()
+    end
+    
+    wait(0.3)
+    return true
+end
+
+-- ============================================
+-- СБОР ФРУКТА (клик + попытка взять)
+-- ============================================
+local function CollectFruit(fruit)
+    local VirtualInput = game:GetService("VirtualInputManager")
+    
+    -- Клик по фрукту (левая кнопка)
+    VirtualInput:SendMouseButtonEvent(0, 0, 1, true, game:GetService("UserInputService").MouseIcon, 0)
+    wait(0.1)
+    VirtualInput:SendMouseButtonEvent(0, 0, 1, false, game:GetService("UserInputService").MouseIcon, 0)
+    
+    wait(0.2)
+    -- Нажимаем E для взаимодействия
+    VirtualInput:SendKeyEvent(true, "E", false, nil)
+    wait(0.1)
+    VirtualInput:SendKeyEvent(false, "E", false, nil)
+    
+    wait(0.3)
+end
+
+-- ============================================
+-- SERVER HOP
+-- ============================================
+local function ServerHop()
+    if IsHopping then return end
+    IsHopping = true
+    
+    print("[SWILL] Хопаем сервер...")
+    
+    local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+    
+    local success, response = pcall(function()
+        return HttpService:JSONDecode(game:HttpGet(url))
+    end)
+    
+    if not success or not response or not response.data then
+        print("[SWILL] Не удалось получить список серверов")
+        IsHopping = false
+        return
+    end
+    
+    local servers = {}
+    for _, server in ipairs(response.data) do
+        if server.id ~= game.JobId 
+           and server.playing < Config.MaxServerPlayers 
+           and server.playing > 0
+           and not VisitedServers[server.id] then
+            table.insert(servers, server)
+        end
+    end
+    
+    if #servers == 0 then
+        print("[SWILL] Нет доступных серверов, пробуем сбросить список")
+        VisitedServers = {}
+        wait(2)
+        IsHopping = false
+        return
+    end
+    
+    -- Выбираем случайный сервер
+    local chosenServer = servers[math.random(1, #servers)]
+    VisitedServers[chosenServer.id] = true
+    
+    print("[SWILL] Телепорт на сервер: " .. chosenServer.id .. " | Игроков: " .. chosenServer.playing)
+    
+    TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
+end
+
+-- ============================================
+-- GUI
+-- ============================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "SwillFruitFarmer"
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 260, 0, 140)
+Frame.Position = UDim2.new(0.5, -130, 0.5, -70)
+Frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+Frame.BackgroundTransparency = 0.15
+Frame.BorderSizePixel = 0
+Frame.Parent = ScreenGui
+
+local Corner = Instance.new("UICorner")
+Corner.CornerRadius = UDim.new(0, 12)
+Corner.Parent = Frame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 25)
+Title.Position = UDim2.new(0, 0, 0, 5)
+Title.BackgroundTransparency = 1
+Title.Text = "SWILL FRUIT FARMER"
+Title.TextColor3 = Color3.fromRGB(255, 215, 0)
+Title.TextScaled = true
+Title.Font = Enum.Font.GothamBold
+Title.Parent = Frame
+
+local Status = Instance.new("TextLabel")
+Status.Size = UDim2.new(1, 0, 0, 20)
+Status.Position = UDim2.new(0, 0, 0, 30)
+Status.BackgroundTransparency = 1
+Status.Text = "Инициализация..."
+Status.TextColor3 = Color3.fromRGB(200, 200, 200)
+Status.TextScaled = true
+Status.Font = Enum.Font.Gotham
+Status.Parent = Frame
+
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0, 200, 0, 32)
+ToggleBtn.Position = UDim2.new(0.5, -100, 0, 55)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+ToggleBtn.Text = "✅ АКТИВЕН"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.TextScaled = true
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.BorderSizePixel = 0
+ToggleBtn.Parent = Frame
+
+local BtnCorner = Instance.new("UICorner")
+BtnCorner.CornerRadius = UDim.new(0, 8)
+BtnCorner.Parent = ToggleBtn
+
+local HopBtn = Instance.new("TextButton")
+HopBtn.Size = UDim2.new(0, 200, 0, 25)
+HopBtn.Position = UDim2.new(0.5, -100, 0, 95)
+HopBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
+HopBtn.Text = "ХОПНУТЬ СЕЙЧАС"
+HopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+HopBtn.TextScaled = true
+HopBtn.Font = Enum.Font.Gotham
+HopBtn.BorderSizePixel = 0
+HopBtn.Parent = Frame
+
+local HopCorner = Instance.new("UICorner")
+HopCorner.CornerRadius = UDim.new(0, 6)
+HopCorner.Parent = HopBtn
+
+-- ============================================
+-- ОСНОВНОЙ ЦИКЛ
+-- ============================================
+local function MainLoop()
+    while Enabled do
+        wait(Config.ScanInterval)
+        
+        if IsHopping then
+            Status.Text = "Хопаем..."
+            continue
+        end
+        
+        local fruit = FindFruit()
+        
+        if fruit then
+            Status.Text = "Найден: " .. fruit.Name
+            print("[SWILL] Найден фрукт: " .. fruit.Name)
+            
+            local success = TeleportToFruit(fruit)
+            
+            if success then
+                wait(0.5)
+                CollectFruit(fruit)
+                Status.Text = "Собрал: " .. fruit.Name
+                print("[SWILL] Собрал: " .. fruit.Name)
+                wait(1)
+            end
+        else
+            Status.Text = "Фруктов нет, хопаем..."
+            print("[SWILL] Фруктов нет на сервере")
+            
+            if Config.AutoHop then
+                wait(Config.HopDelay)
+                ServerHop()
+            end
+        end
+    end
+end
+
+-- ============================================
+-- АНТИ-АФК
+-- ============================================
+if Config.AntiAFK then
+    spawn(function()
+        while Enabled do
+            wait(15)
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new(0, 0))
+            end)
+        end
+    end)
+end
+
+-- ============================================
+-- ОБРАБОТЧИКИ
+-- ============================================
+ToggleBtn.MouseButton1Click:Connect(function()
+    Enabled = not Enabled
+    if Enabled then
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+        ToggleBtn.Text = "✅ АКТИВЕН"
+        Status.Text = "Запуск..."
+        spawn(MainLoop)
+    else
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+        ToggleBtn.Text = "⛔ ВЫКЛЮЧЕН"
+        Status.Text = "Остановлен"
+    end
+end)
+
+HopBtn.MouseButton1Click:Connect(function()
+    if not IsHopping then
+        spawn(ServerHop)
+    end
+end)
+
+-- ЗАПУСК
+Status.Text = "Готов | Поиск фруктов..."
+spawn(MainLoop)
+
+print("========================================")
+print("SWILL FRUIT FARMER | Delta | ЗАПУЩЕН")
+print("Авто-поиск: ВКЛ")
+print("Авто-хоп: ВКЛ")
+print("Анти-АФК: ВКЛ")
+print("========================================")
