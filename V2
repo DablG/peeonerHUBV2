@@ -1,20 +1,22 @@
--- SWILL FRUIT FARMER (Delta)
--- Авто-сбор фруктов + Server Hop + Anti-AFK
+-- SWILL FRUIT FARMER v2 (Delta)
+-- Бесконечный Server Hop + Авто-сбор фруктов + Anti-AFK
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local VirtualUser = game:GetService("VirtualUser")
+local VirtualInput = game:GetService("VirtualInputManager")
+local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 
 -- НАСТРОЙКИ
 local Config = {
-    ScanInterval = 2,        -- Как часто сканировать фрукты (сек)
-    HopDelay = 5,            -- Задержка перед хопом (сек)
-    MaxServerPlayers = 8,    -- Макс игроков в сервере для хопа
-    TweenSpeed = 300,        -- Скорость полёта
+    ScanInterval = 2,
+    HopRetryDelay = 3,      -- Задержка между попытками хопа
+    MaxServerPlayers = 8,
+    TweenSpeed = 300,
     AntiAFK = true,
     AutoHop = true
 }
@@ -22,6 +24,7 @@ local Config = {
 local Enabled = true
 local VisitedServers = {}
 local IsHopping = false
+local HopAttempts = 0
 
 -- ============================================
 -- ПОИСК ФРУКТОВ
@@ -30,7 +33,8 @@ local function FindFruit()
     for _, v in pairs(Workspace:GetChildren()) do
         if v:IsA("Tool") or v:IsA("Model") then
             local name = v.Name:lower()
-            if name:find("fruit") or name:find("dragon") or name:find("dough") or name:find("leopard") or name:find("kitsune") then
+            if name:find("fruit") or name:find("dragon") or name:find("dough") 
+               or name:find("leopard") or name:find("kitsune") then
                 return v
             end
         end
@@ -52,20 +56,15 @@ local function TeleportToFruit(fruit)
     if not fruitPart and fruit:IsA("Tool") then
         fruitPart = fruit:FindFirstChild("Handle")
     end
-    
     if not fruitPart then return false end
     
-    -- Плавный полёт к фрукту
-    local targetPos = fruitPart.CFrame
     local distance = (hrp.Position - fruitPart.Position).Magnitude
     
     if distance > 500 then
-        -- Далеко — телепорт
-        hrp.CFrame = targetPos * CFrame.new(0, 5, 0)
+        hrp.CFrame = fruitPart.CFrame * CFrame.new(0, 5, 0)
     else
-        -- Близко — плавный полёт
         local tweenInfo = TweenInfo.new(distance / Config.TweenSpeed, Enum.EasingStyle.Linear)
-        local tween = game:GetService("TweenService"):Create(hrp, tweenInfo, {CFrame = targetPos * CFrame.new(0, 5, 0)})
+        local tween = TweenService:Create(hrp, tweenInfo, {CFrame = fruitPart.CFrame * CFrame.new(0, 5, 0)})
         tween:Play()
         tween.Completed:Wait()
     end
@@ -75,34 +74,23 @@ local function TeleportToFruit(fruit)
 end
 
 -- ============================================
--- СБОР ФРУКТА (клик + попытка взять)
+-- СБОР ФРУКТА
 -- ============================================
 local function CollectFruit(fruit)
-    local VirtualInput = game:GetService("VirtualInputManager")
-    
-    -- Клик по фрукту (левая кнопка)
     VirtualInput:SendMouseButtonEvent(0, 0, 1, true, game:GetService("UserInputService").MouseIcon, 0)
     wait(0.1)
     VirtualInput:SendMouseButtonEvent(0, 0, 1, false, game:GetService("UserInputService").MouseIcon, 0)
-    
     wait(0.2)
-    -- Нажимаем E для взаимодействия
     VirtualInput:SendKeyEvent(true, "E", false, nil)
     wait(0.1)
     VirtualInput:SendKeyEvent(false, "E", false, nil)
-    
     wait(0.3)
 end
 
 -- ============================================
--- SERVER HOP
+-- ПОЛУЧЕНИЕ СПИСКА СЕРВЕРОВ
 -- ============================================
-local function ServerHop()
-    if IsHopping then return end
-    IsHopping = true
-    
-    print("[SWILL] Хопаем сервер...")
-    
+local function GetServers()
     local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
     
     local success, response = pcall(function()
@@ -110,9 +98,7 @@ local function ServerHop()
     end)
     
     if not success or not response or not response.data then
-        print("[SWILL] Не удалось получить список серверов")
-        IsHopping = false
-        return
+        return {}
     end
     
     local servers = {}
@@ -125,21 +111,62 @@ local function ServerHop()
         end
     end
     
-    if #servers == 0 then
-        print("[SWILL] Нет доступных серверов, пробуем сбросить список")
-        VisitedServers = {}
-        wait(2)
-        IsHopping = false
-        return
+    return servers
+end
+
+-- ============================================
+-- БЕСКОНЕЧНЫЙ SERVER HOP
+-- ============================================
+local function InfiniteServerHop()
+    if IsHopping then return end
+    IsHopping = true
+    
+    HopAttempts = 0
+    
+    while Enabled do
+        HopAttempts = HopAttempts + 1
+        print("[SWILL] Попытка хопа #" .. HopAttempts)
+        
+        local servers = GetServers()
+        
+        -- Если не нашли серверов — сбрасываем список и пробуем снова
+        if #servers == 0 then
+            print("[SWILL] Нет серверов, сброс списка...")
+            VisitedServers = {}
+            wait(Config.HopRetryDelay)
+            -- Продолжаем цикл, не выходим
+        else
+            -- Пробуем каждый сервер по очереди
+            for _, server in ipairs(servers) do
+                if not Enabled then
+                    IsHopping = false
+                    return
+                end
+                
+                print("[SWILL] Пробуем сервер: " .. server.id .. " | Игроков: " .. server.playing)
+                VisitedServers[server.id] = true
+                
+                -- Пытаемся телепортироваться
+                local success = pcall(function()
+                    TeleportService:TeleportToPlaceInstance(PlaceId, server.id, LocalPlayer)
+                end)
+                
+                if not success then
+                    print("[SWILL] Ошибка телепорта, пробуем следующий...")
+                end
+                
+                -- Ждём. Если телепорт сработает — этот скрипт умрёт вместе с сервером.
+                -- Если не сработает — продолжаем цикл.
+                wait(Config.HopRetryDelay)
+            end
+        end
+        
+        -- Если дошли сюда — значит ни один сервер не сработал, повторяем
+        print("[SWILL] Все сервера не сработали, повторяем...")
+        wait(Config.HopRetryDelay)
     end
     
-    -- Выбираем случайный сервер
-    local chosenServer = servers[math.random(1, #servers)]
-    VisitedServers[chosenServer.id] = true
-    
-    print("[SWILL] Телепорт на сервер: " .. chosenServer.id .. " | Игроков: " .. chosenServer.playing)
-    
-    TeleportService:TeleportToPlaceInstance(PlaceId, chosenServer.id, LocalPlayer)
+    IsHopping = false
 end
 
 -- ============================================
@@ -150,8 +177,8 @@ ScreenGui.Name = "SwillFruitFarmer"
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 260, 0, 140)
-Frame.Position = UDim2.new(0.5, -130, 0.5, -70)
+Frame.Size = UDim2.new(0, 280, 0, 160)
+Frame.Position = UDim2.new(0.5, -140, 0.5, -80)
 Frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 Frame.BackgroundTransparency = 0.15
 Frame.BorderSizePixel = 0
@@ -165,7 +192,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, 0, 0, 25)
 Title.Position = UDim2.new(0, 0, 0, 5)
 Title.BackgroundTransparency = 1
-Title.Text = "SWILL FRUIT FARMER"
+Title.Text = "SWILL FRUIT FARMER v2"
 Title.TextColor3 = Color3.fromRGB(255, 215, 0)
 Title.TextScaled = true
 Title.Font = Enum.Font.GothamBold
@@ -181,9 +208,19 @@ Status.TextScaled = true
 Status.Font = Enum.Font.Gotham
 Status.Parent = Frame
 
+local AttemptsLabel = Instance.new("TextLabel")
+AttemptsLabel.Size = UDim2.new(1, 0, 0, 18)
+AttemptsLabel.Position = UDim2.new(0, 0, 0, 50)
+AttemptsLabel.BackgroundTransparency = 1
+AttemptsLabel.Text = "Попыток хопа: 0"
+AttemptsLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+AttemptsLabel.TextScaled = true
+AttemptsLabel.Font = Enum.Font.Gotham
+AttemptsLabel.Parent = Frame
+
 local ToggleBtn = Instance.new("TextButton")
-ToggleBtn.Size = UDim2.new(0, 200, 0, 32)
-ToggleBtn.Position = UDim2.new(0.5, -100, 0, 55)
+ToggleBtn.Size = UDim2.new(0, 220, 0, 32)
+ToggleBtn.Position = UDim2.new(0.5, -110, 0, 72)
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
 ToggleBtn.Text = "✅ АКТИВЕН"
 ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -197,8 +234,8 @@ BtnCorner.CornerRadius = UDim.new(0, 8)
 BtnCorner.Parent = ToggleBtn
 
 local HopBtn = Instance.new("TextButton")
-HopBtn.Size = UDim2.new(0, 200, 0, 25)
-HopBtn.Position = UDim2.new(0.5, -100, 0, 95)
+HopBtn.Size = UDim2.new(0, 220, 0, 28)
+HopBtn.Position = UDim2.new(0.5, -110, 0, 112)
 HopBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
 HopBtn.Text = "ХОПНУТЬ СЕЙЧАС"
 HopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -243,12 +280,22 @@ local function MainLoop()
             print("[SWILL] Фруктов нет на сервере")
             
             if Config.AutoHop then
-                wait(Config.HopDelay)
-                ServerHop()
+                wait(Config.HopRetryDelay)
+                spawn(InfiniteServerHop)
             end
         end
     end
 end
+
+-- ============================================
+-- ОБНОВЛЕНИЕ СЧЁТЧИКА ПОПЫТОК
+-- ============================================
+spawn(function()
+    while Enabled do
+        wait(0.5)
+        AttemptsLabel.Text = "Попыток хопа: " .. HopAttempts
+    end
+end)
 
 -- ============================================
 -- АНТИ-АФК
@@ -284,7 +331,7 @@ end)
 
 HopBtn.MouseButton1Click:Connect(function()
     if not IsHopping then
-        spawn(ServerHop)
+        spawn(InfiniteServerHop)
     end
 end)
 
@@ -293,8 +340,8 @@ Status.Text = "Готов | Поиск фруктов..."
 spawn(MainLoop)
 
 print("========================================")
-print("SWILL FRUIT FARMER | Delta | ЗАПУЩЕН")
-print("Авто-поиск: ВКЛ")
-print("Авто-хоп: ВКЛ")
+print("SWILL FRUIT FARMER v2 | Delta")
+print("Бесконечный хоп: ВКЛ")
+print("Авто-сбор: ВКЛ")
 print("Анти-АФК: ВКЛ")
 print("========================================")
