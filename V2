@@ -1,5 +1,5 @@
--- SWILL SEPARATE FARMER v5 (Delta)
--- 4 отдельные функции: Фрукты | Гача | Фабрика | Пираты
+-- SWILL SEPARATE FARMER v6 (Delta)
+-- Фрукты | Гача | Фабрика | Пираты | Хаки | Стиль боя
 -- + бесконечный хоп + анти-афк
 
 local Players = game:GetService("Players")
@@ -19,7 +19,9 @@ local Config = {
     MaxServerPlayers = 8,
     TweenSpeed = 300,
     ScanInterval = 1.5,
-    AntiAFK = true
+    AntiAFK = true,
+    HakiCheckInterval = 5, -- Как часто проверять хаки
+    StyleCheckInterval = 10 -- Как часто проверять стиль боя
 }
 
 -- ОТДЕЛЬНЫЕ ПЕРЕКЛЮЧАТЕЛИ
@@ -27,7 +29,9 @@ local Toggles = {
     Fruits = false,
     Gacha = false,
     Factory = false,
-    Pirates = false
+    Pirates = false,
+    Haki = false,      -- НОВОЕ
+    Style = false      -- НОВОЕ
 }
 
 local Enabled = true
@@ -35,6 +39,91 @@ local IsHopping = false
 local VisitedServers = {}
 local HopAttempts = 0
 local StartTime = tick()
+local LastHakiCheck = 0
+local LastStyleCheck = 0
+
+-- ============================================
+-- АВТО ХАКИ (Buso / Ken)
+-- ============================================
+local function UseHaki()
+    local char = LocalPlayer.Character
+    if not char then return false end
+    
+    local humanoid = char:FindFirstChild("Humanoid")
+    if not humanoid then return false end
+    
+    -- Проверяем, есть ли у персонажа способности хаки
+    -- Buso Haki (Armament)
+    local buso = char:FindFirstChild("Buso") or char:FindFirstChild("Armament")
+    if buso then
+        pcall(function()
+            buso:Activate()
+        end)
+    end
+    
+    -- Ken Haki (Observation)
+    local ken = char:FindFirstChild("Ken") or char:FindFirstChild("Observation")
+    if ken then
+        pcall(function()
+            ken:Activate()
+        end)
+    end
+    
+    -- Альтернативный способ через клавиши (если есть)
+    -- Buso обычно на клавише Z, Ken на X (зависит от настроек)
+    -- Но это может конфликтовать с другими функциями, поэтому используем проверку объектов
+    
+    return true
+end
+
+-- ============================================
+-- АВТО ВЫБОР СТИЛЯ БОЯ
+-- ============================================
+local function SelectFightingStyle()
+    local char = LocalPlayer.Character
+    if not char then return false end
+    
+    local humanoid = char:FindFirstChild("Humanoid")
+    if not humanoid then return false end
+    
+    -- Ищем доступные стили боя в Backpack или Character
+    local styles = {
+        "Godhuman", "Sanguine Art", "Dragon Talon", "Electric Claw",
+        "Sharkman Karate", "Death Step", "Superhuman", "Dragon Claw",
+        "Fishman Karate", "Black Leg", "Electro"
+    }
+    
+    -- Проверяем, что уже экипировано
+    local currentTool = char:FindFirstChildOfClass("Tool")
+    local currentName = currentTool and currentTool.Name or ""
+    
+    -- Если стиль уже хороший, не меняем
+    for _, styleName in ipairs(styles) do
+        if currentName:find(styleName) then
+            return true
+        end
+    end
+    
+    -- Ищем лучший доступный стиль
+    for _, styleName in ipairs(styles) do
+        -- Проверяем в Backpack
+        for _, item in pairs(LocalPlayer.Backpack:GetChildren()) do
+            if item.Name:find(styleName) then
+                humanoid:EquipTool(item)
+                return true
+            end
+        end
+        -- Проверяем в Character
+        for _, item in pairs(char:GetChildren()) do
+            if item:IsA("Tool") and item.Name:find(styleName) then
+                -- Уже экипирован
+                return true
+            end
+        end
+    end
+    
+    return false
+end
 
 -- ============================================
 -- ПОИСК ФРУКТОВ
@@ -226,8 +315,8 @@ ScreenGui.Name = "SwillSeparate"
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 320, 0, 280)
-Frame.Position = UDim2.new(0.5, -160, 0.5, -140)
+Frame.Size = UDim2.new(0, 320, 0, 340)
+Frame.Position = UDim2.new(0.5, -160, 0.5, -170)
 Frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 Frame.BackgroundTransparency = 0.15
 Frame.BorderSizePixel = 0
@@ -238,7 +327,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, 0, 0, 25)
 Title.Position = UDim2.new(0, 0, 0, 5)
 Title.BackgroundTransparency = 1
-Title.Text = "SWILL SEPARATE v5"
+Title.Text = "SWILL SEPARATE v6"
 Title.TextColor3 = Color3.fromRGB(255, 215, 0)
 Title.TextScaled = true
 Title.Font = Enum.Font.GothamBold
@@ -257,7 +346,7 @@ Status.Parent = Frame
 -- ФУНКЦИЯ СОЗДАНИЯ КНОПОК
 local function CreateToggle(name, y, key)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 260, 0, 30)
+    btn.Size = UDim2.new(0, 260, 0, 28)
     btn.Position = UDim2.new(0.5, -130, 0, y)
     btn.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
     btn.Text = "⛔ " .. name
@@ -281,16 +370,18 @@ local function CreateToggle(name, y, key)
     return btn
 end
 
--- 4 ОТДЕЛЬНЫЕ КНОПКИ
+-- 6 ОТДЕЛЬНЫХ КНОПОК
 CreateToggle("СБОР ФРУКТОВ", 55, "Fruits")
-CreateToggle("ГАЧА", 90, "Gacha")
-CreateToggle("ФАБРИКА", 125, "Factory")
-CreateToggle("ПИРАТЫ", 160, "Pirates")
+CreateToggle("ГАЧА", 88, "Gacha")
+CreateToggle("ФАБРИКА", 121, "Factory")
+CreateToggle("ПИРАТЫ", 154, "Pirates")
+CreateToggle("АВТО ХАКИ", 187, "Haki")       -- НОВОЕ
+CreateToggle("СТИЛЬ БОЯ", 220, "Style")      -- НОВОЕ
 
 -- ТАЙМЕР
 local TimerLabel = Instance.new("TextLabel")
 TimerLabel.Size = UDim2.new(1, 0, 0, 18)
-TimerLabel.Position = UDim2.new(0, 0, 0, 195)
+TimerLabel.Position = UDim2.new(0, 0, 0, 253)
 TimerLabel.BackgroundTransparency = 1
 TimerLabel.Text = "До хопа: 30 сек"
 TimerLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
@@ -300,7 +391,7 @@ TimerLabel.Parent = Frame
 
 local AttemptsLabel = Instance.new("TextLabel")
 AttemptsLabel.Size = UDim2.new(1, 0, 0, 18)
-AttemptsLabel.Position = UDim2.new(0, 0, 0, 213)
+AttemptsLabel.Position = UDim2.new(0, 0, 0, 271)
 AttemptsLabel.BackgroundTransparency = 1
 AttemptsLabel.Text = "Хопов: 0"
 AttemptsLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
@@ -310,7 +401,7 @@ AttemptsLabel.Parent = Frame
 
 local HopBtn = Instance.new("TextButton")
 HopBtn.Size = UDim2.new(0, 260, 0, 28)
-HopBtn.Position = UDim2.new(0.5, -130, 0, 235)
+HopBtn.Position = UDim2.new(0.5, -130, 0, 295)
 HopBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
 HopBtn.Text = "ХОПНУТЬ СЕЙЧАС"
 HopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -383,6 +474,24 @@ local function MainLoop()
             end
         end
 
+        -- 5. АВТО ХАКИ (работает в фоне)
+        if Toggles.Haki then
+            local now = tick()
+            if now - LastHakiCheck >= Config.HakiCheckInterval then
+                UseHaki()
+                LastHakiCheck = now
+            end
+        end
+
+        -- 6. СТИЛЬ БОЯ (работает в фоне)
+        if Toggles.Style then
+            local now = tick()
+            if now - LastStyleCheck >= Config.StyleCheckInterval then
+                SelectFightingStyle()
+                LastStyleCheck = now
+            end
+        end
+
         if not anyActive then
             Status.Text = "Поиск..."
             wait(Config.ScanInterval)
@@ -426,7 +535,7 @@ Status.Text = "Готов | Выбери функции"
 spawn(MainLoop)
 
 print("========================================")
-print("SWILL SEPARATE v5 | Delta")
-print("4 отдельные функции")
+print("SWILL SEPARATE v6 | Delta")
+print("6 отдельных функций")
 print("30 сек -> хоп | Анти-АФК")
 print("========================================")
