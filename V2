@@ -1,28 +1,49 @@
--- SWILL AUTO FARM SUITE (Delta / Xeno)
--- Авто-сбор фруктов | Авто-гача | Авто-фабрика | Авто-пираты
+-- SWILL SEPARATE FARMER v5 (Delta)
+-- 4 отдельные функции: Фрукты | Гача | Фабрика | Пираты
+-- + бесконечный хоп + анти-афк
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local VirtualUser = game:GetService("VirtualUser")
 local VirtualInput = game:GetService("VirtualInputManager")
 local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
+local PlaceId = game.PlaceId
 
 -- НАСТРОЙКИ
 local Config = {
-    ScanInterval = 1.5,
+    FarmTime = 30,
+    HopRetryDelay = 3,
+    MaxServerPlayers = 8,
     TweenSpeed = 300,
-    AutoGacha = true,
-    AutoFactory = true,
-    AutoPirates = true
+    ScanInterval = 1.5,
+    AntiAFK = true
 }
 
--- ФУНКЦИЯ ПОИСКА ФРУКТОВ
+-- ОТДЕЛЬНЫЕ ПЕРЕКЛЮЧАТЕЛИ
+local Toggles = {
+    Fruits = false,
+    Gacha = false,
+    Factory = false,
+    Pirates = false
+}
+
+local Enabled = true
+local IsHopping = false
+local VisitedServers = {}
+local HopAttempts = 0
+local StartTime = tick()
+
+-- ============================================
+-- ПОИСК ФРУКТОВ
+-- ============================================
 local function FindFruit()
     for _, v in pairs(Workspace:GetChildren()) do
         if v:IsA("Tool") or v:IsA("Model") then
             local name = v.Name:lower()
-            -- Ищем всё, что похоже на фрукт
-            if name:find("fruit") or name:find("dragon") or name:find("dough") 
+            if name:find("fruit") or name:find("dragon") or name:find("dough")
                or name:find("leopard") or name:find("kitsune") or name:find("venom")
                or name:find("shadow") or name:find("buddha") or name:find("portal") then
                 return v
@@ -32,20 +53,21 @@ local function FindFruit()
     return nil
 end
 
--- ТЕЛЕПОРТ И СБОР
+-- ============================================
+-- СБОР ФРУКТА
+-- ============================================
 local function CollectFruit(fruit)
     local char = LocalPlayer.Character
-    if not char then return end
+    if not char then return false end
     local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    if not hrp then return false end
 
     local fruitPart = fruit:FindFirstChildWhichIsA("BasePart")
     if not fruitPart and fruit:IsA("Tool") then
         fruitPart = fruit:FindFirstChild("Handle")
     end
-    if not fruitPart then return end
+    if not fruitPart then return false end
 
-    -- Телепорт (плавно или сразу)
     local dist = (hrp.Position - fruitPart.Position).Magnitude
     if dist > 500 then
         hrp.CFrame = fruitPart.CFrame * CFrame.new(0, 5, 0)
@@ -56,7 +78,6 @@ local function CollectFruit(fruit)
     end
 
     wait(0.2)
-    -- Сбор (клик + E)
     VirtualInput:SendMouseButtonEvent(0, 0, 1, true, game:GetService("UserInputService").MouseIcon, 0)
     wait(0.05)
     VirtualInput:SendMouseButtonEvent(0, 0, 1, false, game:GetService("UserInputService").MouseIcon, 0)
@@ -64,20 +85,21 @@ local function CollectFruit(fruit)
     VirtualInput:SendKeyEvent(true, "E", false, nil)
     wait(0.05)
     VirtualInput:SendKeyEvent(false, "E", false, nil)
+    return true
 end
 
--- АВТО-ГАЧА (Покупка/Ролл)
+-- ============================================
+-- ГАЧА
+-- ============================================
 local function DoGacha()
-    -- Ищем NPC Гачи или кнопку
     for _, v in pairs(Workspace:GetDescendants()) do
         if v:IsA("Model") and v:FindFirstChild("Humanoid") then
             local name = v.Name:lower()
-            if name:find("gacha") or name:find("dealer") or name:find("blox fruit dealer") then
+            if name:find("gacha") or name:find("dealer") then
                 local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if hrp then
                     hrp.CFrame = v.HumanoidRootPart.CFrame * CFrame.new(0, 0, -3)
                     wait(0.3)
-                    -- Взаимодействие (E)
                     VirtualInput:SendKeyEvent(true, "E", false, nil)
                     wait(0.1)
                     VirtualInput:SendKeyEvent(false, "E", false, nil)
@@ -90,26 +112,25 @@ local function DoGacha()
     return false
 end
 
--- АВТО-ФАБРИКА (Поиск и атака ядра)
+-- ============================================
+-- ФАБРИКА
+-- ============================================
 local function DoFactory()
     for _, v in pairs(Workspace:GetDescendants()) do
         if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
             local name = v.Name:lower()
-            if name:find("core") or name:find("factory") or name:find("raid") then
-                if v.Humanoid.Health > 0 then
-                    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        hrp.CFrame = v.HumanoidRootPart.CFrame * CFrame.new(0, 0, -5)
-                        wait(0.1)
-                        -- Атака (Q + Клик)
-                        VirtualInput:SendKeyEvent(true, "Q", false, nil)
-                        wait(0.05)
-                        VirtualInput:SendKeyEvent(false, "Q", false, nil)
-                        VirtualInput:SendMouseButtonEvent(0, 0, 1, true, game:GetService("UserInputService").MouseIcon, 0)
-                        wait(0.05)
-                        VirtualInput:SendMouseButtonEvent(0, 0, 1, false, game:GetService("UserInputService").MouseIcon, 0)
-                        return true
-                    end
+            if (name:find("core") or name:find("factory") or name:find("raid")) and v.Humanoid.Health > 0 then
+                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.CFrame = v.HumanoidRootPart.CFrame * CFrame.new(0, 0, -5)
+                    wait(0.1)
+                    VirtualInput:SendKeyEvent(true, "Q", false, nil)
+                    wait(0.05)
+                    VirtualInput:SendKeyEvent(false, "Q", false, nil)
+                    VirtualInput:SendMouseButtonEvent(0, 0, 1, true, game:GetService("UserInputService").MouseIcon, 0)
+                    wait(0.05)
+                    VirtualInput:SendMouseButtonEvent(0, 0, 1, false, game:GetService("UserInputService").MouseIcon, 0)
+                    return true
                 end
             end
         end
@@ -117,15 +138,15 @@ local function DoFactory()
     return false
 end
 
--- АВТО-ПИРАТЫ (Атака врагов)
+-- ============================================
+-- ПИРАТЫ
+-- ============================================
 local function DoPirates()
     for _, v in pairs(Workspace:GetDescendants()) do
         if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
             if v.Humanoid.Health > 0 then
                 local name = v.Name:lower()
-                -- Ищем пиратов, морпехов или врагов
                 if name:find("pirate") or name:find("marine") or name:find("enemy") or name:find("soldier") or name:find("guard") then
-                    -- Проверка, что это не игрок
                     if not Players:GetPlayerFromCharacter(v) then
                         local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                         if hrp then
@@ -147,43 +168,265 @@ local function DoPirates()
     return false
 end
 
+-- ============================================
+-- SERVER HOP
+-- ============================================
+local function GetServers()
+    local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+    local success, response = pcall(function()
+        return HttpService:JSONDecode(game:HttpGet(url))
+    end)
+    if not success or not response or not response.data then return {} end
+    local servers = {}
+    for _, server in ipairs(response.data) do
+        if server.id ~= game.JobId
+           and server.playing < Config.MaxServerPlayers
+           and server.playing > 0
+           and not VisitedServers[server.id] then
+            table.insert(servers, server)
+        end
+    end
+    return servers
+end
+
+local function InfiniteHop()
+    if IsHopping then return end
+    IsHopping = true
+    while Enabled do
+        HopAttempts = HopAttempts + 1
+        print("[SWILL] Хоп #" .. HopAttempts)
+        local servers = GetServers()
+        if #servers == 0 then
+            VisitedServers = {}
+            wait(Config.HopRetryDelay)
+        else
+            for i = #servers, 2, -1 do
+                local j = math.random(i)
+                servers[i], servers[j] = servers[j], servers[i]
+            end
+            for _, server in ipairs(servers) do
+                if not Enabled then IsHopping = false return end
+                VisitedServers[server.id] = true
+                pcall(function()
+                    TeleportService:TeleportToPlaceInstance(PlaceId, server.id, LocalPlayer)
+                end)
+                wait(Config.HopRetryDelay)
+            end
+        end
+        wait(Config.HopRetryDelay)
+    end
+    IsHopping = false
+end
+
+-- ============================================
+-- GUI
+-- ============================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "SwillSeparate"
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 320, 0, 280)
+Frame.Position = UDim2.new(0.5, -160, 0.5, -140)
+Frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+Frame.BackgroundTransparency = 0.15
+Frame.BorderSizePixel = 0
+Frame.Parent = ScreenGui
+Instance.new("UICorner").Parent = Frame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 25)
+Title.Position = UDim2.new(0, 0, 0, 5)
+Title.BackgroundTransparency = 1
+Title.Text = "SWILL SEPARATE v5"
+Title.TextColor3 = Color3.fromRGB(255, 215, 0)
+Title.TextScaled = true
+Title.Font = Enum.Font.GothamBold
+Title.Parent = Frame
+
+local Status = Instance.new("TextLabel")
+Status.Size = UDim2.new(1, 0, 0, 20)
+Status.Position = UDim2.new(0, 0, 0, 30)
+Status.BackgroundTransparency = 1
+Status.Text = "Выбери функции"
+Status.TextColor3 = Color3.fromRGB(200, 200, 200)
+Status.TextScaled = true
+Status.Font = Enum.Font.Gotham
+Status.Parent = Frame
+
+-- ФУНКЦИЯ СОЗДАНИЯ КНОПОК
+local function CreateToggle(name, y, key)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 260, 0, 30)
+    btn.Position = UDim2.new(0.5, -130, 0, y)
+    btn.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+    btn.Text = "⛔ " .. name
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextScaled = true
+    btn.Font = Enum.Font.GothamBold
+    btn.BorderSizePixel = 0
+    btn.Parent = Frame
+    Instance.new("UICorner").Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        Toggles[key] = not Toggles[key]
+        if Toggles[key] then
+            btn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+            btn.Text = "✅ " .. name
+        else
+            btn.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+            btn.Text = "⛔ " .. name
+        end
+    end)
+    return btn
+end
+
+-- 4 ОТДЕЛЬНЫЕ КНОПКИ
+CreateToggle("СБОР ФРУКТОВ", 55, "Fruits")
+CreateToggle("ГАЧА", 90, "Gacha")
+CreateToggle("ФАБРИКА", 125, "Factory")
+CreateToggle("ПИРАТЫ", 160, "Pirates")
+
+-- ТАЙМЕР
+local TimerLabel = Instance.new("TextLabel")
+TimerLabel.Size = UDim2.new(1, 0, 0, 18)
+TimerLabel.Position = UDim2.new(0, 0, 0, 195)
+TimerLabel.BackgroundTransparency = 1
+TimerLabel.Text = "До хопа: 30 сек"
+TimerLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+TimerLabel.TextScaled = true
+TimerLabel.Font = Enum.Font.Gotham
+TimerLabel.Parent = Frame
+
+local AttemptsLabel = Instance.new("TextLabel")
+AttemptsLabel.Size = UDim2.new(1, 0, 0, 18)
+AttemptsLabel.Position = UDim2.new(0, 0, 0, 213)
+AttemptsLabel.BackgroundTransparency = 1
+AttemptsLabel.Text = "Хопов: 0"
+AttemptsLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+AttemptsLabel.TextScaled = true
+AttemptsLabel.Font = Enum.Font.Gotham
+AttemptsLabel.Parent = Frame
+
+local HopBtn = Instance.new("TextButton")
+HopBtn.Size = UDim2.new(0, 260, 0, 28)
+HopBtn.Position = UDim2.new(0.5, -130, 0, 235)
+HopBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
+HopBtn.Text = "ХОПНУТЬ СЕЙЧАС"
+HopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+HopBtn.TextScaled = true
+HopBtn.Font = Enum.Font.GothamBold
+HopBtn.BorderSizePixel = 0
+HopBtn.Parent = Frame
+Instance.new("UICorner").Parent = HopBtn
+
+-- ============================================
 -- ОСНОВНОЙ ЦИКЛ
-spawn(function()
-    while wait(Config.ScanInterval) do
+-- ============================================
+local function MainLoop()
+    while Enabled do
+        wait(0.5)
+        if IsHopping then
+            Status.Text = "Хопаем..."
+            continue
+        end
+
+        local elapsed = tick() - StartTime
+        local remaining = math.max(0, Config.FarmTime - math.floor(elapsed))
+        TimerLabel.Text = "До хопа: " .. remaining .. " сек"
+
+        if elapsed >= Config.FarmTime then
+            Status.Text = "Время вышло — хопаем!"
+            StartTime = tick()
+            spawn(InfiniteHop)
+            continue
+        end
+
         local char = LocalPlayer.Character
         if not char then continue end
-        
-        -- 1. Сбор фруктов
-        local fruit = FindFruit()
-        if fruit then
-            CollectFruit(fruit)
+
+        local anyActive = false
+
+        -- 1. ФРУКТЫ
+        if Toggles.Fruits then
+            local fruit = FindFruit()
+            if fruit then
+                Status.Text = "Найден: " .. fruit.Name
+                CollectFruit(fruit)
+                Status.Text = "Собрал: " .. fruit.Name
+                wait(0.5)
+                anyActive = true
+            end
         end
 
-        -- 2. Гача
-        if Config.AutoGacha then
-            DoGacha()
+        -- 2. ГАЧА
+        if Toggles.Gacha and not anyActive then
+            if DoGacha() then
+                Status.Text = "Гача..."
+                anyActive = true
+            end
         end
 
-        -- 3. Фабрика
-        if Config.AutoFactory then
-            DoFactory()
+        -- 3. ФАБРИКА
+        if Toggles.Factory and not anyActive then
+            if DoFactory() then
+                Status.Text = "Фабрика..."
+                anyActive = true
+            end
         end
 
-        -- 4. Пираты
-        if Config.AutoPirates then
-            DoPirates()
+        -- 4. ПИРАТЫ
+        if Toggles.Pirates and not anyActive then
+            if DoPirates() then
+                Status.Text = "Пираты..."
+                anyActive = true
+            end
+        end
+
+        if not anyActive then
+            Status.Text = "Поиск..."
+            wait(Config.ScanInterval)
         end
     end
-end)
+end
 
+-- ============================================
 -- АНТИ-АФК
+-- ============================================
+if Config.AntiAFK then
+    spawn(function()
+        while Enabled do
+            wait(15)
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new(0, 0))
+            end)
+        end
+    end)
+end
+
 spawn(function()
-    while wait(15) do
-        pcall(function()
-            game:GetService("VirtualUser"):CaptureController()
-            game:GetService("VirtualUser"):ClickButton2(Vector2.new(0, 0))
-        end)
+    while Enabled do
+        wait(0.5)
+        AttemptsLabel.Text = "Хопов: " .. HopAttempts
     end
 end)
 
-print("SWILL SUITE | Фрукты + Гача + Фабрика + Пираты | ЗАПУЩЕН")
+-- ============================================
+-- ОБРАБОТЧИКИ
+-- ============================================
+HopBtn.MouseButton1Click:Connect(function()
+    if not IsHopping then
+        StartTime = tick()
+        spawn(InfiniteHop)
+    end
+end)
+
+Status.Text = "Готов | Выбери функции"
+spawn(MainLoop)
+
+print("========================================")
+print("SWILL SEPARATE v5 | Delta")
+print("4 отдельные функции")
+print("30 сек -> хоп | Анти-АФК")
+print("========================================")
