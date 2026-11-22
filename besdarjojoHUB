@@ -1,12 +1,11 @@
 -- ============================================================
---  BLOX FRUITS — AUTO FARM (LEVEL + CANDY) с ВКЛ/ВЫКЛ
+--  BLOX FRUITS — AUTO FARM (LEVEL + CANDY) — Xeno-совместимая версия
 -- ============================================================
 if game.PlaceId ~= 2753915549 and game.PlaceId ~= 4442272183 and game.PlaceId ~= 7449423635 then
     return warn("[BF] Это не Blox Fruits!")
 end
 
 local Players      = game:GetService("Players")
-local RunService   = game:GetService("RunService")
 local Workspace    = game:GetService("Workspace")
 local VirtualUser  = game:GetService("VirtualUser")
 local TweenService = game:GetService("TweenService")
@@ -15,11 +14,11 @@ local StarterGui   = game:GetService("StarterGui")
 
 local LP = Players.LocalPlayer
 
--- ================== СОСТОЯНИЯ (ВКЛ/ВЫКЛ) ==================
+-- ================== СОСТОЯНИЯ ==================
 local State = {
-    AutoFarmLevel = false,   -- по умолчанию ВЫКЛ
-    AutoFarmCandy = false,   -- по умолчанию ВЫКЛ
-    AutoHaki      = true,
+    AutoFarmLevel  = false,
+    AutoFarmCandy  = false,
+    AutoHaki       = true,
     AttackDistance = 30,
 }
 
@@ -33,49 +32,61 @@ local function notify(msg)
     print("[BF]", msg)
 end
 
-local function getChar() return LP.Character or LP.CharacterAdded:Wait() end
 local function getHRP()
     local c = LP.Character
     return c and c:FindFirstChild("HumanoidRootPart")
 end
+
 local function isAlive()
     local c = LP.Character
     if not c then return false end
     local h = c:FindFirstChildOfClass("Humanoid")
     return h and h.Health > 0
 end
+
 local function tweenTo(pos, speed)
-    local hrp = getHRP(); if not hrp then return end
+    local hrp = getHRP()
+    if not hrp then return end
     speed = speed or 70
     local dist = (pos - hrp.Position).Magnitude
-    local info = TweenInfo.new(dist / speed, Enum.EasingStyle.Linear)
+    local info = TweenInfo.new(math.max(dist / speed, 0.1), Enum.EasingStyle.Linear)
     local tw = TweenService:Create(hrp, info, {CFrame = CFrame.new(pos)})
     tw:Play()
     tw.Completed:Wait()
 end
+
+-- Атака: только через Tool:Activate(), без VirtualInputManager
 local function attackTool()
     local char = LP.Character
     if not char then return end
     for _, t in ipairs(char:GetChildren()) do
-        if t:IsA("Tool") then pcall(function() t:Activate() end) end
+        if t:IsA("Tool") then
+            pcall(function() t:Activate() end)
+        end
     end
 end
 
--- Анти-АФК
+-- Анти-АФК (работает в Xeno, VirtualUser поддерживается)
 LP.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
+    pcall(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
 end)
 
--- Авто Haki (постоянно)
+-- Авто Haki
 task.spawn(function()
     while task.wait(1) do
         if not State.AutoHaki or not isAlive() then continue end
         pcall(function()
+            local char = LP.Character
+            if not char then return end
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if not hum then return end
             for _, name in ipairs({"Haki", "Buso Haki", "Ken Haki", "Observation"}) do
-                local t = LP.Backpack:FindFirstChild(name) or LP.Character:FindFirstChild(name)
+                local t = LP.Backpack:FindFirstChild(name) or char:FindFirstChild(name)
                 if t and t:IsA("Tool") then
-                    LP.Character.Humanoid:EquipTool(t)
+                    hum:EquipTool(t)
                     t:Activate()
                 end
             end
@@ -84,10 +95,11 @@ task.spawn(function()
 end)
 
 -- ============================================================
---  ФУНКЦИЯ 1: АВТО ФАРМ УРОВНЯ (вкл/выкл через State.AutoFarmLevel)
+--  ФУНКЦИЯ 1: АВТО ФАРМ УРОВНЯ
 -- ============================================================
 local function getNearestEnemy()
-    local hrp = getHRP(); if not hrp then return nil end
+    local hrp = getHRP()
+    if not hrp then return nil end
     local best, bestDist = nil, math.huge
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("Model") then
@@ -107,33 +119,28 @@ local function getNearestEnemy()
 end
 
 local function farmLevelTick()
-    if not State.AutoFarmLevel then return end
-    if not isAlive() then return end
+    if not State.AutoFarmLevel or not isAlive() then return end
     local enemy = getNearestEnemy()
     if not enemy then return end
 
     local root = enemy:FindFirstChild("HumanoidRootPart") or enemy.PrimaryPart
-    local hum  = enemy:FindFirstChildOfClass("Humanoid")
-    if not root or not hum then return end
+    if not root then return end
 
-    local hrp = getHRP(); if not hrp then return end
+    local hrp = getHRP()
+    if not hrp then return end
+
     if (root.Position - hrp.Position).Magnitude > State.AttackDistance then
         tweenTo(root.Position + Vector3.new(0, 5, 0), 90)
     end
     attackTool()
-    pcall(function()
-        local vim = game:GetService("VirtualInputManager")
-        vim:SendKeyEvent(true, "E", false, game)
-        vim:SendKeyEvent(false, "E", false, game)
-    end)
 end
 
 -- ============================================================
---  ФУНКЦИЯ 2: АВТО ФАРМ КОНФЕТ (вкл/выкл через State.AutoFarmCandy)
+--  ФУНКЦИЯ 2: АВТО ФАРМ КОНФЕТ
 -- ============================================================
 local function findCandy()
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("Model") or obj:IsA("Tool") or obj:IsA("MeshPart") then
+        if obj:IsA("Model") or obj:IsA("Tool") or obj:IsA("MeshPart") or obj:IsA("Part") then
             local n = obj.Name:lower()
             if n:find("candy") or n:find("candie") or n:find("sweet") then
                 return obj
@@ -144,17 +151,23 @@ local function findCandy()
 end
 
 local function farmCandyTick()
-    if not State.AutoFarmCandy then return end
-    if not isAlive() then return end
+    if not State.AutoFarmCandy or not isAlive() then return end
     local candy = findCandy()
     if not candy then return end
 
-    local part = candy:IsA("Model")
-        and (candy.PrimaryPart or candy:FindFirstChild("HumanoidRootPart") or candy:FindFirstChildWhichIsA("BasePart"))
-        or candy
-    if not part or not part.Position then return end
+    local part
+    if candy:IsA("Model") then
+        part = candy.PrimaryPart
+            or candy:FindFirstChild("HumanoidRootPart")
+            or candy:FindFirstChildWhichIsA("BasePart")
+    elseif candy:IsA("BasePart") then
+        part = candy
+    end
+    if not part then return end
 
-    local hrp = getHRP(); if not hrp then return end
+    local hrp = getHRP()
+    if not hrp then return end
+
     if (part.Position - hrp.Position).Magnitude > State.AttackDistance then
         tweenTo(part.Position + Vector3.new(0, 5, 0), 80)
     end
@@ -162,7 +175,7 @@ local function farmCandyTick()
 end
 
 -- ============================================================
---  ГЛАВНЫЙ ЦИКЛ (вызывает tick-функции, только если включены)
+--  ГЛАВНЫЙ ЦИКЛ
 -- ============================================================
 task.spawn(function()
     while task.wait(0.3) do
@@ -172,7 +185,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
---  ПРОСТОЕ GUI-МЕНЮ С ЧЕКБОКСАМИ
+--  GUI-МЕНЮ
 -- ============================================================
 local gui = Instance.new("ScreenGui")
 gui.Name = "BFFarmGUI"
@@ -192,7 +205,7 @@ Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, 0, 0, 30)
 title.BackgroundTransparency = 1
-title.Text = "BF Farm"
+title.Text = "BF Farm (Xeno)"
 title.TextColor3 = Color3.fromRGB(255, 200, 50)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 16
@@ -203,7 +216,6 @@ local function makeToggle(text, yPos, key, hotkey)
     btn.Size = UDim2.new(1, -20, 0, 32)
     btn.Position = UDim2.new(0, 10, 0, yPos)
     btn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
-    btn.Text = string.format("%s: %s", text, State[key] and "ВКЛ" or "ВЫКЛ")
     btn.TextColor3 = Color3.white
     btn.Font = Enum.Font.Gotham
     btn.TextSize = 13
@@ -234,8 +246,8 @@ local function makeToggle(text, yPos, key, hotkey)
     end)
 end
 
-makeToggle("Авто фарм уровня", 40, "AutoFarmLevel", "Z")
-makeToggle("Авто фарм конфет", 80, "AutoFarmCandy", "X")
+makeToggle("Авто фарм уровня", 40,  "AutoFarmLevel", "Z")
+makeToggle("Авто фарм конфет", 80,  "AutoFarmCandy", "X")
 makeToggle("Авто Haki",       120, "AutoHaki",      "C")
 
-notify("Меню BF Farm загружено. Z — уровень, X — конфеты, C — Haki")
+notify("Меню BF Farm (Xeno) загружено. Z — уровень, X — конфеты, C — Haki")
